@@ -206,3 +206,342 @@ function surJeton(f){
     el.onclick = ()=> f(+el.dataset.id);
   });
 }
+
+/* ------------------------------------------------ 1. roster */
+function vRoster(){
+  vue(`<h2>Le roster du club</h2>
+    <p class="hint">Un nom par ligne. Tu ne fais ça qu'une fois : il est conservé d'une séance à l'autre.</p>
+    <textarea id="ta" placeholder="Kevin Durand&#10;Bruno Petit&#10;Marie Lambert">${S.roster.map(p=>p.nom).join('\n')}</textarea>`,
+    [{t:'Enregistrer le roster', cls:'go', f:()=>{
+      const l = $('#ta').value.split('\n').map(s=>s.trim()).filter(Boolean);
+      S.roster = l.map((n,i)=>({id:i+1, nom:n}));
+      if(!S.roster.length) return;
+      S.phase='presents'; rendre();
+    }}]);
+}
+
+/* ------------------------------------------------ 2. présents */
+function vPresents(){
+  const n = S.presents.length;
+  const t = n>=20?6:5;
+  vue(`<h2>Qui est là ?</h2>
+    <p class="hint">${n} présents${n>=12?` · terrain ${t}v${t} · équipes de ${Math.floor(n/2)}`:' · il en faut 12 minimum'}</p>
+    ${jetons(S.roster, p=>({cls: S.presents.includes(p.id)?'on':''}))}`,
+    [{t:'Roster', cls:'ghost', f:()=>{S.phase='roster';rendre();}},
+     {t:'Constituer les équipes', cls:'go', off:n<12, f:()=>{
+       S.terrain=t; S.phase='constitution'; S.etape=0; rendre();}}]);
+  surJeton(id=>{
+    const i=S.presents.indexOf(id);
+    if(i<0) S.presents.push(id); else S.presents.splice(i,1);
+    rendre();
+  });
+}
+
+/* ------------------------------------------------ 3. constitution */
+const ETAPES = ['Capitaines','Protégés','Vivier','Tirage','Enchère'];
+function vConstitution(){
+  const pres = S.roster.filter(p=>S.presents.includes(p.id));
+  const strip = `<div class="pas">${ETAPES.map((_,i)=>`<i class="${i<=S.etape?'fait':''}"></i>`).join('')}</div>`;
+  const retour = {t:'Retour', cls:'ghost', f:()=>{
+    if(S.etape>0){ S.etape--; } else { S.phase='presents'; }
+    rendre();}};
+
+  /* --- capitaines --- */
+  if(S.etape===0){
+    vue(strip+`<h2>Les deux capitaines</h2>
+      <p class="hint">Rotation : ceux qui n'ont pas capitainé depuis le plus longtemps. Choisis-en deux.</p>
+      ${jetons(pres, p=>({cls:S.cap.includes(p.id)?'on':''}))}`,
+      [retour,{t:'Suite', cls:'go', off:S.cap.length!==2, f:()=>{S.etape=1;rendre();}}]);
+    return surJeton(id=>{
+      const i=S.cap.indexOf(id);
+      if(i>=0) S.cap.splice(i,1); else if(S.cap.length<2) S.cap.push(id);
+      rendre();
+    });
+  }
+
+  /* --- protégés --- */
+  if(S.etape===1){
+    const dispo = pres.filter(p=>!S.cap.includes(p.id));
+    const q = S.protege.length;
+    vue(strip+`<h2>Protégé de ${nom(S.cap[q] ?? S.cap[1])}</h2>
+      <p class="hint">Chaque capitaine garde une personne d'office, avant le tirage.
+      ${q?`Déjà pris : ${nom(S.protege[0])}.`:''}</p>
+      ${jetons(dispo.filter(p=>!S.protege.includes(p.id)), ()=>({}))}`,
+      [retour,
+       {t:'Aucun', cls:'ghost', off:q>=2, f:()=>{S.protege.push(null);
+         if(S.protege.length>=2) S.etape=2; rendre();}},
+       {t:'Suite', cls:'go', off:S.protege.length<2, f:()=>{S.etape=2;rendre();}}]);
+    return surJeton(id=>{
+      S.protege.push(id);
+      if(S.protege.length>=2) S.etape=2;
+      rendre();
+    });
+  }
+
+  /* --- vivier --- */
+  if(S.etape===2){
+    const pris = [...S.cap, ...S.protege.filter(Boolean)];
+    const dispo = pres.filter(p=>!pris.includes(p.id));
+    vue(strip+`<h2>Le vivier · ${S.vivier.length}/8</h2>
+      <p class="hint">Les agents libres, les seuls mis aux enchères. Volontaires la première fois ;
+      ensuite les mieux classés.</p>
+      ${jetons(dispo, p=>({cls:S.vivier.includes(p.id)?'on':''}))}`,
+      [retour,{t:'Tirer au sort le reste', cls:'go', off:!S.vivier.length,
+        f:()=>{tirage(); S.etape=3; rendre();}}]);
+    return surJeton(id=>{
+      const i=S.vivier.indexOf(id);
+      if(i>=0) S.vivier.splice(i,1); else if(S.vivier.length<8) S.vivier.push(id);
+      rendre();
+    });
+  }
+
+  /* --- tirage --- */
+  if(S.etape===3){
+    vue(strip+`<h2>Les deux bases</h2>
+      <p class="hint">Annonce-les à voix haute, avec les armes. C'est ce qui rend l'enchère
+      intéressante : chacun voit son trou et celui d'en face.</p>
+      ${['A','B'].map(e=>`
+        <h3 style="margin:14px 0 6px;color:var(--${e==='A'?'a':'b'})">Équipe ${nom(S.cap[e==='A'?0:1])}</h3>
+        ${jetons(S.roster.filter(p=>S.eq[p.id]===e), p=>({
+          cls:e.toLowerCase(), sub:S.role[p.id]+(S.load[p.id]?' · '+LOADOUTS[S.load[p.id]]:'')
+        }))}`).join('')}`,
+      [{t:'Retirer', cls:'ghost', f:()=>{tirage();rendre();}},
+       {t:'Enchère', cls:'go', f:()=>{S.etape=4;rendre();}}]);
+    return surJeton(id=> cycleLoadout(id));
+  }
+
+  /* --- enchère --- */
+  const reste = S.vivier.filter(id=>!S.eq[id]);
+  const dep = e => S.vivier.filter(i=>S.eq[i]===e).reduce((s,i)=>s+(S.prix[i]||0),0);
+  if(S.etape===4){
+    vue(strip+`<h2>L'enchère</h2>
+      <p class="hint">Nominer, c'est miser : ouverture au plancher, incrément 5, 10 secondes sans
+      relance et c'est adjugé. Budget ${S.budget} pièces chacun.</p>
+      <table><tr><th>Équipe</th><th class="n">Dépensé</th><th class="n">Reste</th><th class="n">Lots</th></tr>
+      ${['A','B'].map(e=>`<tr><td style="color:var(--${e==='A'?'a':'b'});font-weight:700">${nom(S.cap[e==='A'?0:1])}</td>
+        <td class="n">${dep(e)}</td><td class="n">${S.budget-dep(e)}</td>
+        <td class="n">${S.vivier.filter(i=>S.eq[i]===e).length}/4</td></tr>`).join('')}</table>
+      <h3 style="margin:16px 0 6px">À vendre · ${reste.length}</h3>
+      ${reste.length ? jetons(S.roster.filter(p=>reste.includes(p.id)), ()=>({}))
+                     : '<p class="hint">Tout est vendu.</p>'}
+      <h3 style="margin:16px 0 6px">Adjugés</h3>
+      ${jetons(S.roster.filter(p=>S.vivier.includes(p.id)&&S.eq[p.id]), p=>({
+        cls:S.eq[p.id].toLowerCase(), sub:S.prix[p.id]+' pièces'}))}`,
+      [retour,{t:'Commencer les assauts', cls:'go', off:reste.length>0,
+        f:()=>{S.phase='combat';rendre();}}]);
+    return surJeton(id=>{
+      if(S.eq[id]){ delete S.eq[id]; delete S.prix[id]; delete S.role[id]; return rendre(); }
+      acheter(id);
+    });
+  }
+}
+
+function tirage(){
+  S.eq={}; S.role={};
+  S.cap.forEach((c,i)=>{ S.eq[c]=i?'B':'A'; S.role[c]='capitaine'; });
+  S.protege.forEach((p,i)=>{ if(p){ S.eq[p]=i?'B':'A'; S.role[p]='protege'; } });
+  const reste = S.presents.filter(id=>!S.eq[id] && !S.vivier.includes(id));
+  for(let i=reste.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [reste[i],reste[j]]=[reste[j],reste[i]]; }
+  reste.forEach((id,i)=>{ S.eq[id]= i%2 ? 'B':'A'; S.role[id]='tirage'; });
+}
+function cycleLoadout(id){
+  const k=Object.keys(LOADOUTS); const i=k.indexOf(S.load[id]);
+  if(i>=k.length-1) delete S.load[id]; else S.load[id]=k[i+1];
+  rendre();
+}
+
+/* ------------------------------------------------ pavé numérique */
+let paveCb=null;
+function pave(titre, cb){
+  paveCb=cb; let v='';
+  const maj = ()=> $('#paveVal').textContent = (v||'0')+' pièces';
+  $('#paveRapide').innerHTML = [5,10,15,20,25,30,40,50,60,80].map(n=>`<button data-v="${n}">${n}</button>`).join('');
+  $('#paveNum').innerHTML = [1,2,3,4,5,6,7,8,9,'C',0,'OK'].map(n=>
+    `<button class="${n==='OK'?'ok':''}" data-k="${n}">${n}</button>`).join('');
+  maj();
+  $('#paveRapide').querySelectorAll('button').forEach(b=>b.onclick=()=>{ fin(+b.dataset.v); });
+  $('#paveNum').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.k;
+    if(k==='C'){ v=''; } else if(k==='OK'){ if(v) fin(+v); } else if(v.length<4){ v+=k; }
+    maj();
+  });
+  $('#pave').classList.add('open');
+  $('#pave').onclick = e=>{ if(e.target.id==='pave') ferme(); };
+}
+function fin(n){ ferme(); paveCb && paveCb(n); }
+function ferme(){ $('#pave').classList.remove('open'); }
+
+function acheter(id){
+  pave(nom(id), prixPaye=>{
+    S._achat={id, prix:prixPaye};
+    vueAchat();
+  });
+}
+function vueAchat(){
+  const {id,prix} = S._achat;
+  vue(`<h2>${nom(id)} · ${prix} pièces</h2><p class="hint">Qui l'emporte ?</p>`,
+    [{t:nom(S.cap[0]), cls:'va', f:()=>adjuger('A')},
+     {t:nom(S.cap[1]), cls:'vb', f:()=>adjuger('B')},
+     {t:'Annuler', cls:'ghost', f:()=>{delete S._achat;rendre();}}]);
+}
+function adjuger(e){
+  const {id,prix}=S._achat;
+  S.eq[id]=e; S.prix[id]=prix; S.role[id]='achat';
+  delete S._achat; rendre();
+}
+
+/* ------------------------------------------------ 4. combat */
+function camp(e){ return S.presents.filter(id=>S.eq[id]===e); }
+function surTerrain(e){ return Object.keys(S.field).filter(id=>S.field[id]===e).map(Number); }
+function banc(e){ return camp(e).filter(id=>!(id in S.field)); }
+function plein(){ return surTerrain('A').length>=S.terrain && surTerrain('B').length>=S.terrain; }
+
+function vCombat(){
+  const html = ['A','B'].map(e=>{
+    const sur = surTerrain(e);
+    const manque = S.terrain - sur.length;
+    return `<div class="camp ${e.toLowerCase()}">
+      <h3>${nom(S.cap[e==='A'?0:1])} · ${sur.length}/${S.terrain}</h3>
+      ${sur.length ? jetons(sur.map(id=>({id,nom:nom(id)})), p=>({
+          cls:(S.surv||[]).includes(p.id)?'vivant':'mort',
+          sub:S.load[p.id]?LOADOUTS[S.load[p.id]]:''}))
+        : '<p class="vide">personne</p>'}
+      ${manque>0 ? `<p class="vide">${manque} à faire entrer</p>` : ''}
+    </div>`;
+  }).join('');
+
+  if(!plein()){
+    const bancs = ['A','B'].map(e=>{
+      const b = banc(e).sort((x,y)=>(S.joues[x]||0)-(S.joues[y]||0) || nom(x).localeCompare(nom(y)));
+      if(!b.length) return '';
+      return `<h3 style="margin:14px 0 6px;color:var(--${e==='A'?'a':'b'})">Banc ${nom(S.cap[e==='A'?0:1])}</h3>
+        ${jetons(b.map(id=>({id,nom:nom(id)})), p=>({
+          cls:(S.joues[p.id]||0)===0?'neuf':'',
+          sub:(S.joues[p.id]||0)+' assauts'}))}`;
+    }).join('');
+    vue(`<div id="terrain">${html}</div>
+      <p class="hint">Trié par assauts joués. Le liseré orange : pas encore combattu.</p>${bancs}`,
+      [{t:'Compléter', s:'les moins joués', cls:'go', f:completer}]);
+    return surJeton(id=>{
+      const e = S.eq[id];
+      if(id in S.field){ delete S.field[id]; }
+      else if(surTerrain(e).length < S.terrain){ S.field[id]=e; }
+      rendre();
+    });
+  }
+
+  S.surv = S.surv||[];
+  vue(`<div id="terrain">${html}</div>
+    <p class="hint">Tape ceux qui sont encore debout, puis le vainqueur.
+    ${S.surv.length} survivant${S.surv.length>1?'s':''}.</p>`,
+    [{t:nom(S.cap[0]), s:'vainqueur', cls:'va', f:()=>valider('A')},
+     {t:'Nul', cls:'ghost', f:()=>valider('nul')},
+     {t:nom(S.cap[1]), s:'vainqueur', cls:'vb', f:()=>valider('B')}]);
+  surJeton(id=>{
+    const i=S.surv.indexOf(id);
+    if(i>=0) S.surv.splice(i,1); else S.surv.push(id);
+    rendre();
+  });
+}
+
+function completer(){
+  ['A','B'].forEach(e=>{
+    const b = banc(e).sort((x,y)=>(S.joues[x]||0)-(S.joues[y]||0) || nom(x).localeCompare(nom(y)));
+    b.slice(0, S.terrain-surTerrain(e).length).forEach(id=> S.field[id]=e);
+  });
+  rendre();
+}
+
+function valider(v){
+  const compo = {...S.field};
+  S.assauts.push({n:S.assauts.length+1, v, compo, surv:[...(S.surv||[])],
+                  t:new Date().toISOString()});
+  Object.keys(compo).forEach(id=> S.joues[id]=(S.joues[id]||0)+1);
+  S.field = {};
+  (S.surv||[]).forEach(id=> S.field[id]=compo[id]);
+  S.surv = [];
+  rendre();
+}
+
+$('#undo').onclick = ()=>{
+  if(S.phase==='bilan'){ S.phase='combat'; return rendre(); }
+  const a = S.assauts.pop();
+  if(!a) return;
+  Object.keys(a.compo).forEach(id=> S.joues[id]=Math.max(0,(S.joues[id]||1)-1));
+  const av = S.assauts[S.assauts.length-1];
+  S.field = {}; S.surv = [];
+  if(av) av.surv.forEach(id=> S.field[id]=av.compo[id]);
+  rendre();
+};
+
+/* ------------------------------------------------ 5. bilan */
+function stats(id){
+  let a=0,v=0,s=0;
+  S.assauts.forEach(x=>{ if(id in x.compo){ a++; if(x.v===x.compo[id]) v++; if(x.surv.includes(id)) s++; } });
+  return {a,v,s};
+}
+function vBilan(){
+  const lignes = S.presents.map(id=>({id,nom:nom(id),e:S.eq[id],p:S.prix[id],...stats(id)}))
+    .sort((x,y)=> (x.e||'').localeCompare(y.e||'') || y.v-x.v);
+  const rqp = lignes.filter(l=>l.p>0).map(l=>({...l,r:l.v/l.p})).sort((x,y)=>y.r-x.r).slice(0,3);
+  vue(`<h2>Bilan de la séance</h2>
+    <p class="hint">${S.assauts.length} assauts · ${S.presents.length} présents</p>
+    ${rqp.length?`<h3 style="margin:12px 0 6px">Meilleur rapport qualité-prix</h3>
+      <table>${rqp.map(l=>`<tr><td>${l.nom}</td><td class="n">${l.v} vict.</td>
+        <td class="n">${l.p} p.</td><td class="n">${l.r.toFixed(3)}</td></tr>`).join('')}</table>`:''}
+    <h3 style="margin:16px 0 6px">Tout le monde</h3>
+    <table><tr><th>Nom</th><th class="n">Ass.</th><th class="n">Vict.</th><th class="n">Surv.</th><th class="n">Prix</th></tr>
+    ${lignes.map(l=>`<tr><td style="color:var(--${l.e==='A'?'a':'b'})">${l.nom}</td>
+      <td class="n">${l.a}</td><td class="n">${l.v}</td><td class="n">${l.s}</td>
+      <td class="n">${l.p||'—'}</td></tr>`).join('')}</table>`,
+    [{t:'Reprendre', cls:'ghost', f:()=>{S.phase='combat';rendre();}},
+     {t:'Exporter', s:'fichier .json', cls:'go', f:exporter},
+     {t:'Copier', cls:'ghost', f:copier}]);
+}
+function paquet(){
+  return JSON.stringify({version:1, debut:S.debut, fin:new Date().toISOString(),
+    terrain:S.terrain, budget:S.budget,
+    roster:S.roster, presents:S.presents, capitaines:S.cap, protege:S.protege, vivier:S.vivier,
+    equipes:S.eq, roles:S.role, prix:S.prix, loadouts:S.load,
+    assauts:S.assauts}, null, 1);
+}
+async function exporter(){
+  const nomF = 'seance-'+new Date().toISOString().slice(0,10)+'.json';
+  const txt = paquet();
+  try{
+    const f = new File([txt], nomF, {type:'application/json'});
+    if(navigator.canShare && navigator.canShare({files:[f]})){
+      await navigator.share({files:[f], title:nomF});
+      return;
+    }
+  }catch(e){ if(e && e.name==='AbortError') return; }
+  try{
+    const b = new Blob([txt], {type:'application/json'});
+    const u = URL.createObjectURL(b), a = document.createElement('a');
+    a.href=u; a.download=nomF; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u), 2000);
+  }catch(e){ copier(); }
+}
+async function copier(){
+  try{ await navigator.clipboard.writeText(paquet()); alert('Copié. Colle-le dans un mail ou une note.'); }
+  catch(e){
+    const t=document.createElement('textarea'); t.value=paquet();
+    document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove();
+    alert('Copié.');
+  }
+}
+
+$('#tour').onclick = ()=>{
+  if(S.phase==='combat'){ S.phase='bilan'; rendre(); }
+  else if(S.phase==='bilan'){ S.phase='combat'; rendre(); }
+};
+
+rendre();
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
+
