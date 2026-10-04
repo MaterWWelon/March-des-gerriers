@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Marché aux Guerriers</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Guerriers">
+<meta name="theme-color" content="#E4E7E9">
+<style>
+:root{
+  --paper:#E4E7E9; --ink:#15181B; --ink-2:#5A6168;
+  --a:#9E2B25; --a-soft:#F0D9D7;
+  --b:#275E7F; --b-soft:#D4E2EA;
+  --dead:#AEB4B9; --line:#C3C9CD;
+  --go:#1A6B41; --warn:#8A5A00;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*,*::before,*::after{box-sizing:inherit;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{
+  background:var(--paper); color:var(--ink);
+  font:500 17px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  display:flex; flex-direction:column; overscroll-behavior:none;
+  -webkit-user-select:none; user-select:none;
+}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+
+/* ---------- barre d'état ---------- */
+#bar{
+  flex:0 0 auto; display:flex; align-items:stretch; gap:1px;
+  background:var(--line); border-bottom:1px solid var(--line);
+}
+#bar>*{background:var(--paper);display:flex;align-items:center;justify-content:center}
+#tour{flex:1;flex-direction:column;padding:8px 4px;line-height:1.1}
+#tour b{font-size:26px;font-variant-numeric:tabular-nums}
+#tour span{font-size:12px;color:var(--ink-2)}
+.pts{flex:0 0 68px;flex-direction:column;color:#fff;padding:8px 0;line-height:1.05}
+.pts.a{background:var(--a)} .pts.b{background:var(--b)}
+.pts b{font-size:30px;font-variant-numeric:tabular-nums}
+.pts span{font-size:11px;opacity:.85}
+#undo{flex:0 0 58px;font-size:22px;color:var(--ink-2)}
+#undo:disabled{opacity:.25}
+
+/* ---------- zone centrale ---------- */
+main{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 10px 4px}
+h2{margin:0 0 4px;font-size:19px;font-weight:700}
+.hint{margin:0 0 14px;font-size:14px;color:var(--ink-2);line-height:1.4}
+
+/* ---------- jetons ---------- */
+.grid{display:flex;flex-wrap:wrap;gap:7px}
+.chip{
+  min-height:56px;padding:8px 14px;border-radius:10px;
+  background:#fff;border:2px solid var(--line);
+  display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
+  font-size:16px;font-weight:600;flex:1 1 auto;min-width:118px;max-width:100%;
+}
+.chip small{font-size:11px;font-weight:500;color:var(--ink-2);margin-top:2px}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip.on small{color:#C9CDD1}
+.chip.a{background:var(--a-soft);border-color:var(--a);color:var(--a)}
+.chip.b{background:var(--b-soft);border-color:var(--b);color:var(--b)}
+.chip.mort{background:#fff;border-color:var(--line);border-style:dashed;color:var(--dead)}
+.chip.mort small{color:var(--dead)}
+.chip.vivant{position:relative}
+.chip.vivant::after{
+  content:"";position:absolute;top:7px;right:9px;
+  width:11px;height:11px;border-radius:50%;background:var(--go);
+}
+.chip.neuf{box-shadow:inset 0 -4px 0 var(--warn)}
+
+/* ---------- terrain ---------- */
+#terrain{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px}
+.camp{border-radius:12px;padding:8px;min-height:120px}
+.camp.a{background:var(--a-soft);outline:2px solid var(--a)}
+.camp.b{background:var(--b-soft);outline:2px solid var(--b)}
+.camp h3{margin:0 0 7px;font-size:12px;font-weight:700;color:var(--ink-2)}
+.camp .chip{min-width:0;width:100%;min-height:48px;font-size:15px;padding:6px 10px}
+.camp .grid{flex-direction:column;gap:5px}
+.vide{font-size:13px;color:var(--ink-2);padding:6px 2px}
+
+/* ---------- barre d'action ---------- */
+#act{
+  flex:0 0 auto;display:flex;gap:7px;padding:9px 10px;
+  padding-bottom:calc(9px + env(safe-area-inset-bottom,0px));
+  border-top:1px solid var(--line);background:var(--paper);
+}
+.btn{
+  flex:1;min-height:62px;border-radius:12px;font-size:18px;font-weight:700;
+  background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;
+  text-align:center;line-height:1.15;padding:6px
+}
+.btn.ghost{background:#fff;color:var(--ink);border:2px solid var(--line)}
+.btn.va{background:var(--a)} .btn.vb{background:var(--b)}
+.btn.go{background:var(--go)}
+.btn[disabled]{opacity:.3}
+.btn small{display:block;font-size:12px;font-weight:500;opacity:.8}
+
+/* ---------- pavé numérique ---------- */
+#pave{position:fixed;inset:0;background:rgba(21,24,27,.55);display:none;z-index:9;
+  align-items:flex-end;padding-bottom:env(safe-area-inset-bottom,0px)}
+#pave.open{display:flex}
+#pave .box{background:var(--paper);width:100%;border-radius:16px 16px 0 0;padding:14px}
+#pave .val{font-size:40px;font-weight:700;text-align:center;font-variant-numeric:tabular-nums;
+  padding:6px 0 12px}
+#pave .rapide{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+#pave .rapide button{flex:1 0 58px;min-height:48px;border-radius:9px;background:#fff;
+  border:2px solid var(--line);font-weight:700}
+#pave .num{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+#pave .num button{min-height:56px;border-radius:9px;background:#fff;border:2px solid var(--line);
+  font-size:22px;font-weight:700}
+#pave .num button.ok{background:var(--go);color:#fff;border-color:var(--go)}
+
+table{width:100%;border-collapse:collapse;font-size:15px}
+td,th{padding:7px 4px;border-bottom:1px solid var(--line);text-align:left}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+textarea{width:100%;min-height:190px;font:inherit;padding:10px;border:2px solid var(--line);
+  border-radius:10px;background:#fff;-webkit-user-select:auto;user-select:auto}
+.pas{display:flex;gap:4px;margin-bottom:12px}
+.pas i{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.pas i.fait{background:var(--ink)}
+@media (prefers-reduced-motion:no-preference){.chip,.btn{transition:background .12s,border-color .12s}}
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <div class="pts a"><b id="sa">0</b><span id="na">A</span></div>
+  <div id="tour"><b id="num">—</b><span id="sous">séance</span></div>
+  <div class="pts b"><b id="sb">0</b><span id="nb">B</span></div>
+  <button id="undo" title="Annuler">⟲</button>
+</div>
+
+<main id="vue"></main>
+<div id="act"></div>
+
+<div id="pave"><div class="box">
+  <div class="val" id="paveVal">0</div>
+  <div class="rapide" id="paveRapide"></div>
+  <div class="num" id="paveNum"></div>
+</div></div>
+
+<script>
+'use strict';
+const CLE = 'mag.seance.v1';
+const LOADOUTS = {eb:'épée+bouclier', hb:'hache 1M+bouclier', h2:'danoise', lb:'lance+bouclier', l2:'lance 2M'};
+
+let S = charger() || neuf();
+
+function neuf(){
+  return {roster:[], presents:[], terrain:6, budget:140,
+          eq:{}, role:{}, prix:{}, load:{},
+          cap:[], protege:[], vivier:[],
+          field:{}, joues:{}, assauts:[], phase:'roster', etape:0,
+          debut:new Date().toISOString()};
+}
+function sauver(){ try{ localStorage.setItem(CLE, JSON.stringify(S)); }catch(e){} }
+function charger(){ try{ return JSON.parse(localStorage.getItem(CLE)); }catch(e){ return null; } }
+const nom = id => (S.roster.find(p=>p.id===id)||{}).nom || '?';
+const $ = s => document.querySelector(s);
+
+/* ------------------------------------------------ rendu général */
+function rendre(){
+  sauver();
+  const a = S.assauts.filter(x=>x.v==='A').length;
+  const b = S.assauts.filter(x=>x.v==='B').length;
+  $('#sa').textContent=a; $('#sb').textContent=b;
+  $('#undo').disabled = !S.assauts.length;
+  const cap = S.cap.map(c=>nom(c).split(' ')[0]);
+  $('#na').textContent = cap[0] || 'A';
+  $('#nb').textContent = cap[1] || 'B';
+  if(S.phase==='combat'){
+    $('#num').textContent = S.assauts.length+1;
+    $('#sous').textContent = 'assaut';
+  } else {
+    $('#num').textContent = S.presents.length || '—';
+    $('#sous').textContent = S.phase==='roster' ? 'roster' : 'présents';
+  }
+  ({roster:vRoster, presents:vPresents, constitution:vConstitution,
+    combat:vCombat, bilan:vBilan})[S.phase]();
+}
+function vue(html, actions){
+  $('#vue').innerHTML = html;
+  $('#act').innerHTML = '';
+  (actions||[]).forEach(a=>{
+    if(!a) return;
+    const b=document.createElement('button');
+    b.className='btn '+(a.cls||'');
+    b.innerHTML = a.t + (a.s?`<small>${a.s}</small>`:'');
+    if(a.off) b.disabled=true; else b.onclick=a.f;
+    $('#act').appendChild(b);
+  });
+  $('#vue').scrollTop = 0;
+}
+function jetons(liste, opts){
+  return `<div class="grid">${liste.map(p=>{
+    const o = opts(p);
+    return `<button class="chip ${o.cls||''}" data-id="${p.id}">${p.nom}${o.sub?`<small>${o.sub}</small>`:''}</button>`;
+  }).join('')}</div>`;
+}
+function surJeton(f){
+  $('#vue').querySelectorAll('.chip[data-id]').forEach(el=>{
+    el.onclick = ()=> f(+el.dataset.id);
+  });
+}
+
+/* ------------------------------------------------ 1. roster */
+function vRoster(){
+  vue(`<h2>Le roster du club</h2>
+    <p class="hint">Un nom par ligne. Tu ne fais ça qu'une fois : il est conservé d'une séance à l'autre.</p>
+    <textarea id="ta" placeholder="Kevin Durand&#10;Bruno Petit&#10;Marie Lambert">${S.roster.map(p=>p.nom).join('\n')}</textarea>`,
+    [{t:'Enregistrer le roster', cls:'go', f:()=>{
+      const l = $('#ta').value.split('\n').map(s=>s.trim()).filter(Boolean);
+      S.roster = l.map((n,i)=>({id:i+1, nom:n}));
+      if(!S.roster.length) return;
+      S.phase='presents'; rendre();
+    }}]);
+}
+
+/* ------------------------------------------------ 2. présents */
+function vPresents(){
+  const n = S.presents.length;
+  const t = n>=20?6:5;
+  vue(`<h2>Qui est là ?</h2>
+    <p class="hint">${n} présents${n>=12?` · terrain ${t}v${t} · équipes de ${Math.floor(n/2)}`:' · il en faut 12 minimum'}</p>
+    ${jetons(S.roster, p=>({cls: S.presents.includes(p.id)?'on':''}))}`,
+    [{t:'Roster', cls:'ghost', f:()=>{S.phase='roster';rendre();}},
+     {t:'Constituer les équipes', cls:'go', off:n<12, f:()=>{
+       S.terrain=t; S.phase='constitution'; S.etape=0; rendre();}}]);
+  surJeton(id=>{
+    const i=S.presents.indexOf(id);
+    if(i<0) S.presents.push(id); else S.presents.splice(i,1);
+    rendre();
+  });
+}
+
+/* ------------------------------------------------ 3. constitution */
+const ETAPES = ['Capitaines','Protégés','Vivier','Tirage','Enchère'];
+function vConstitution(){
+  const pres = S.roster.filter(p=>S.presents.includes(p.id));
+  const strip = `<div class="pas">${ETAPES.map((_,i)=>`<i class="${i<=S.etape?'fait':''}"></i>`).join('')}</div>`;
+  const retour = {t:'Retour', cls:'ghost', f:()=>{
+    if(S.etape>0){ S.etape--; } else { S.phase='presents'; }
+    rendre();}};
+
+  /* --- capitaines --- */
+  if(S.etape===0){
+    vue(strip+`<h2>Les deux capitaines</h2>
+      <p class="hint">Rotation : ceux qui n'ont pas capitainé depuis le plus longtemps. Choisis-en deux.</p>
+      ${jetons(pres, p=>({cls:S.cap.includes(p.id)?'on':''}))}`,
+      [retour,{t:'Suite', cls:'go', off:S.cap.length!==2, f:()=>{S.etape=1;rendre();}}]);
+    return surJeton(id=>{
+      const i=S.cap.indexOf(id);
+      if(i>=0) S.cap.splice(i,1); else if(S.cap.length<2) S.cap.push(id);
+      rendre();
+    });
+  }
+
+  /* --- protégés --- */
+  if(S.etape===1){
+    const dispo = pres.filter(p=>!S.cap.includes(p.id));
+    const q = S.protege.length;
+    vue(strip+`<h2>Protégé de ${nom(S.cap[q] ?? S.cap[1])}</h2>
+      <p class="hint">Chaque capitaine garde une personne d'office, avant le tirage.
+      ${q?`Déjà pris : ${nom(S.protege[0])}.`:''}</p>
+      ${jetons(dispo.filter(p=>!S.protege.includes(p.id)), ()=>({}))}`,
+      [retour,
+       {t:'Aucun', cls:'ghost', off:q>=2, f:()=>{S.protege.push(null);
+         if(S.protege.length>=2) S.etape=2; rendre();}},
+       {t:'Suite', cls:'go', off:S.protege.length<2, f:()=>{S.etape=2;rendre();}}]);
+    return surJeton(id=>{
+      S.protege.push(id);
+      if(S.protege.length>=2) S.etape=2;
+      rendre();
+    });
+  }
+
+  /* --- vivier --- */
+  if(S.etape===2){
+    const pris = [...S.cap, ...S.protege.filter(Boolean)];
+    const dispo = pres.filter(p=>!pris.includes(p.id));
+    vue(strip+`<h2>Le vivier · ${S.vivier.length}/8</h2>
+      <p class="hint">Les agents libres, les seuls mis aux enchères. Volontaires la première fois ;
+      ensuite les mieux classés.</p>
+      ${jetons(dispo, p=>({cls:S.vivier.includes(p.id)?'on':''}))}`,
+      [retour,{t:'Tirer au sort le reste', cls:'go', off:!S.vivier.length,
+        f:()=>{tirage(); S.etape=3; rendre();}}]);
+    return surJeton(id=>{
+      const i=S.vivier.indexOf(id);
+      if(i>=0) S.vivier.splice(i,1); else if(S.vivier.length<8) S.vivier.push(id);
+      rendre();
+    });
+  }
+
+  /* --- tirage --- */
+  if(S.etape===3){
+    vue(strip+`<h2>Les deux bases</h2>
+      <p class="hint">Annonce-les à voix haute, avec les armes. C'est ce qui rend l'enchère
+      intéressante : chacun voit son trou et celui d'en face.</p>
+      ${['A','B'].map(e=>`
+        <h3 style="margin:14px 0 6px;color:var(--${e==='A'?'a':'b'})">Équipe ${nom(S.cap[e==='A'?0:1])}</h3>
+        ${jetons(S.roster.filter(p=>S.eq[p.id]===e), p=>({
+          cls:e.toLowerCase(), sub:S.role[p.id]+(S.load[p.id]?' · '+LOADOUTS[S.load[p.id]]:'')
+        }))}`).join('')}`,
+      [{t:'Retirer', cls:'ghost', f:()=>{tirage();rendre();}},
+       {t:'Enchère', cls:'go', f:()=>{S.etape=4;rendre();}}]);
+    return surJeton(id=> cycleLoadout(id));
+  }
+
+  /* --- enchère --- */
+  const reste = S.vivier.filter(id=>!S.eq[id]);
+  const dep = e => S.vivier.filter(i=>S.eq[i]===e).reduce((s,i)=>s+(S.prix[i]||0),0);
+  if(S.etape===4){
+    vue(strip+`<h2>L'enchère</h2>
+      
