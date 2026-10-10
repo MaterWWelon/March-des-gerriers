@@ -1,13 +1,26 @@
 """Statistiques, planchers d'enchère et rotation des capitaines."""
 
+# Grille des planchers, appliquée par quartile À L'INTÉRIEUR DU VIVIER.
+# Calibrée par simulation : les quartiles calculés sur tous les présents
+# concentraient les 8 vendus dans le haut de la grille et absorbaient 54 %
+# du budget avant la première surenchère. Ici on tombe à 25 %.
 GRILLE_PLANCHERS = [
-    (0.25, 20),   # top 25 %
-    (0.50, 15),
-    (0.75, 10),
+    (0.25, 15),   # top 25 % du vivier
+    (0.50, 10),
+    (0.75, 5),
     (1.00, 5),
 ]
 PLANCHER_NOUVEAU = 10
-SEANCES_FENETRE = 3
+# Deux séances suffisent pour classer quelqu'un. À trois, un membre qui vient
+# une semaine sur trois attendait dix semaines avant d'exister dans le système ;
+# à deux, sept. Avec un effectif qui tourne, c'est ce réglage qui décide
+# combien de présents sont réellement classables chaque soir (13 contre 9).
+SEANCES_FENETRE = 2
+TAILLE_VIVIER = 8
+# En dessous de quatre classés dans le vivier, les quartiles n'ont plus de sens
+# (un seul classé tomberait seul dans le dernier quartile, donc au plancher le
+# plus bas, moins cher qu'un inconnu). On met alors tout le monde à plat.
+MIN_CLASSES = 4
 
 
 def fiche(con, fighter_id):
@@ -86,14 +99,28 @@ def classement(con, ids=None):
     return lignes
 
 
-def planchers(con, ids):
-    """Grille FIXE recalculée chaque semaine : masse totale constante,
-    donc inflation mathématiquement impossible."""
-    cl = classement(con, ids)
+def vivier(con, ids, taille=TAILLE_VIVIER):
+    """Les mieux classés parmi les présents : ce sont eux qu'on met aux enchères."""
+    return [l["id"] for l in classement(con, ids)[:taille]]
+
+
+def planchers(con, ids, vivier_ids=None):
+    """Grille FIXE recalculée chaque séance : masse totale constante,
+    donc inflation mathématiquement impossible.
+
+    Les quartiles s'appliquent AU VIVIER, pas à tous les présents : les 8 mis
+    en vente sont déjà les mieux classés, les tarifer sur le classement global
+    les collerait tous dans le haut de la grille.
+    """
+    if vivier_ids is None:
+        vivier_ids = vivier(con, ids)
+    cl = [l for l in classement(con, ids) if l["id"] in set(vivier_ids)]
     classes = [l for l in cl if l["seances"] >= SEANCES_FENETRE]
     novices = [l for l in cl if l["seances"] < SEANCES_FENETRE]
 
     out = {}
+    if len(classes) < MIN_CLASSES:
+        return {l["id"]: PLANCHER_NOUVEAU for l in cl}
     total = len(classes)
     for i, l in enumerate(classes):
         q = (i + 1) / total if total else 1.0
