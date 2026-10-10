@@ -4,8 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>Marché aux Guerriers</title>
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icone-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Guerriers">
@@ -22,7 +20,7 @@
   padding-bottom:env(safe-area-inset-bottom,0px);
 }
 *,*::before,*::after{box-sizing:inherit;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;margin:0}
+html,body{height:100%;margin:0;max-width:100%;overflow-x:hidden}
 body{
   background:var(--paper); color:var(--ink);
   font:500 17px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
@@ -43,7 +41,8 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 .pts{flex:0 0 68px;flex-direction:column;color:#fff;padding:8px 0;line-height:1.05}
 .pts.a{background:var(--a)} .pts.b{background:var(--b)}
 .pts b{font-size:30px;font-variant-numeric:tabular-nums}
-.pts span{font-size:11px;opacity:.85}
+.pts span{font-size:11px;opacity:.85;max-width:62px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
 #undo{flex:0 0 58px;font-size:22px;color:var(--ink-2)}
 #undo:disabled{opacity:.25}
 
@@ -86,20 +85,26 @@ h2{margin:0 0 4px;font-size:19px;font-weight:700}
 
 /* ---------- barre d'action ---------- */
 #act{
-  flex:0 0 auto;display:flex;gap:7px;padding:9px 10px;
+  flex:0 0 auto;display:flex;gap:7px;padding:9px 10px;max-width:100%;
+  padding-left:calc(10px + env(safe-area-inset-left,0px));
+  padding-right:calc(10px + env(safe-area-inset-right,0px));
   padding-bottom:calc(9px + env(safe-area-inset-bottom,0px));
   border-top:1px solid var(--line);background:var(--paper);
 }
 .btn{
-  flex:1;min-height:62px;border-radius:12px;font-size:18px;font-weight:700;
-  background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;
-  text-align:center;line-height:1.15;padding:6px
+  flex:1 1 0;min-width:0;min-height:62px;border-radius:12px;font-size:18px;font-weight:700;
+  background:var(--ink);color:#fff;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  text-align:center;line-height:1.15;padding:6px 8px;overflow:hidden
 }
+.btn>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn.mini{flex:0 0 54px;font-size:21px}
 .btn.ghost{background:#fff;color:var(--ink);border:2px solid var(--line)}
 .btn.va{background:var(--a)} .btn.vb{background:var(--b)}
 .btn.go{background:var(--go)}
 .btn[disabled]{opacity:.3}
-.btn small{display:block;font-size:12px;font-weight:500;opacity:.8}
+.btn small{display:block;font-size:12px;font-weight:500;opacity:.8;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- pavé numérique ---------- */
 #pave{position:fixed;inset:0;background:rgba(21,24,27,.55);display:none;z-index:9;
@@ -171,7 +176,10 @@ function rendre(){
   const b = S.assauts.filter(x=>x.v==='B').length;
   $('#sa').textContent=a; $('#sb').textContent=b;
   $('#undo').disabled = !S.assauts.length;
-  const cap = S.cap.map(c=>nom(c).split(' ')[0]);
+  let cap = S.cap.map(c=>nom(c).split(' ')[0]);
+  // si les deux premiers mots sont identiques (« numéro 1 » / « numéro 2 »),
+  // on affiche le nom complet plutôt que deux étiquettes jumelles
+  if(cap[0] && cap[0]===cap[1]) cap = S.cap.map(c=>nom(c));
   $('#na').textContent = cap[0] || 'A';
   $('#nb').textContent = cap[1] || 'B';
   if(S.phase==='combat'){
@@ -191,7 +199,7 @@ function vue(html, actions){
     if(!a) return;
     const b=document.createElement('button');
     b.className='btn '+(a.cls||'');
-    b.innerHTML = a.t + (a.s?`<small>${a.s}</small>`:'');
+    b.innerHTML = `<span>${a.t}</span>` + (a.s?`<small>${a.s}</small>`:'');
     if(a.off) b.disabled=true; else b.onclick=a.f;
     $('#act').appendChild(b);
   });
@@ -456,13 +464,14 @@ function vCombat(){
   }
 
   S.surv = S.surv||[];
+  const court = i => nom(S.cap[i]).split(' ')[0];
   vue(`<div id="terrain">${html}</div>
     <p class="hint">Tape ceux qui sont encore debout, puis le vainqueur.
     ${S.surv.length} survivant${S.surv.length>1?'s':''}.</p>`,
-    [{t:'↩', s:'compo', cls:'ghost', f:()=>{S.enCours=false;S.surv=[];rendre();}},
-     {t:nom(S.cap[0]), s:'vainqueur', cls:'va', f:()=>valider('A')},
-     {t:'Nul', cls:'ghost', f:()=>valider('nul')},
-     {t:nom(S.cap[1]), s:'vainqueur', cls:'vb', f:()=>valider('B')}]);
+    [{t:'↩', cls:'ghost mini', f:()=>{S.enCours=false;S.surv=[];rendre();}},
+     {t:court(0), s:'vainqueur', cls:'va', f:()=>valider('A')},
+     {t:'Nul', cls:'ghost mini', f:()=>valider('nul')},
+     {t:court(1), s:'vainqueur', cls:'vb', f:()=>valider('B')}]);
   surJeton(id=>{
     const i=S.surv.indexOf(id);
     if(i>=0) S.surv.splice(i,1); else S.surv.push(id);
