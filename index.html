@@ -245,7 +245,12 @@ function vConstitution(){
   const pres = S.roster.filter(p=>S.presents.includes(p.id));
   const strip = `<div class="pas">${ETAPES.map((_,i)=>`<i class="${i<=S.etape?'fait':''}"></i>`).join('')}</div>`;
   const retour = {t:'Retour', cls:'ghost', f:()=>{
-    if(S.etape>0){ S.etape--; } else { S.phase='presents'; }
+    // Revenir en arrière annule l'étape qu'on quitte, sinon les choix s'accumulent.
+    if(S.etape===4){ S.vivier.forEach(id=>{ delete S.eq[id]; delete S.prix[id]; delete S.role[id]; }); S.etape=3; }
+    else if(S.etape===3){ S.eq={}; S.role={}; S.etape=2; }
+    else if(S.etape===2){ S.vivier=[]; S.etape=1; }
+    else if(S.etape===1){ S.protege=[]; S.etape=0; }
+    else { S.cap=[]; S.phase='presents'; }
     rendre();}};
 
   /* --- capitaines --- */
@@ -263,19 +268,29 @@ function vConstitution(){
 
   /* --- protégés --- */
   if(S.etape===1){
-    const dispo = pres.filter(p=>!S.cap.includes(p.id));
-    const q = S.protege.length;
-    vue(strip+`<h2>Protégé de ${nom(S.cap[q] ?? S.cap[1])}</h2>
+    const pris = [...S.cap, ...S.protege.filter(Boolean)];
+    const dispo = pres.filter(p=>!pris.includes(p.id));
+    const qui = i => S.protege[i] ? nom(S.protege[i]) : 'aucun';
+    vue(strip+`<h2>Les protégés</h2>
       <p class="hint">Chaque capitaine garde une personne d'office, avant le tirage.
-      ${q?`Déjà pris : ${nom(S.protege[0])}.`:''}</p>
-      ${jetons(dispo.filter(p=>!S.protege.includes(p.id)), ()=>({}))}`,
+      Tape un protégé déjà choisi pour le retirer.</p>
+      <table>
+        <tr><td style="color:var(--a);font-weight:700">${nom(S.cap[0])}</td><td>${qui(0)}</td></tr>
+        <tr><td style="color:var(--b);font-weight:700">${nom(S.cap[1])}</td><td>${qui(1)}</td></tr>
+      </table>
+      ${S.protege.filter(Boolean).length ? `<h3 style="margin:16px 0 6px">Choisis</h3>
+      ${jetons(S.roster.filter(p=>S.protege.includes(p.id)), p=>({
+        cls: S.protege[0]===p.id ? 'a' : 'b'}))}` : ''}
+      <h3 style="margin:16px 0 6px">Disponibles</h3>
+      ${jetons(dispo, ()=>({}))}`,
       [retour,
-       {t:'Aucun', cls:'ghost', off:q>=2, f:()=>{S.protege.push(null);
-         if(S.protege.length>=2) S.etape=2; rendre();}},
-       {t:'Suite', cls:'go', off:S.protege.length<2, f:()=>{S.etape=2;rendre();}}]);
+       {t:'Sans protégé', cls:'ghost', f:()=>{S.protege=[];S.etape=2;rendre();}},
+       {t:'Suite', cls:'go', f:()=>{S.etape=2;rendre();}}]);
     return surJeton(id=>{
-      S.protege.push(id);
-      if(S.protege.length>=2) S.etape=2;
+      const i = S.protege.indexOf(id);
+      if(i>=0){ S.protege[i]=null; }
+      else if(!S.protege[0]){ S.protege[0]=id; }
+      else if(!S.protege[1]){ S.protege[1]=id; }
       rendre();
     });
   }
