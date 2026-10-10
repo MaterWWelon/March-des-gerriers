@@ -1,3 +1,7 @@
 *.db
 *.json
 __pycache__/
+<<<<<<< HEAD
+=======
+*.pyc
+>>>>>>> eb78ee4 (Ignore base, exports et pycache)

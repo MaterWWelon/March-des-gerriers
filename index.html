@@ -157,19 +157,74 @@ textarea{width:100%;min-height:190px;font:inherit;padding:10px;border:2px solid 
 const CLE = 'mag.seance.v1';
 const LOADOUTS = {eb:'épée+bouclier', hb:'hache 1M+bouclier', h2:'danoise', lb:'lance+bouclier', l2:'lance 2M'};
 
+const GRILLE = [[0.25,15],[0.50,10],[0.75,5],[1.00,5]];  // quartiles DANS le vivier
+const PLANCHER_NEUF = 10;
+const MIN_CLASSES = 4;   // sous ce seuil les quartiles n'ont plus de sens
+
 let S = charger() || neuf();
 
 function neuf(){
   return {roster:[], presents:[], terrain:6, budget:140,
           eq:{}, role:{}, prix:{}, load:{},
           cap:[], protege:[], vivier:[],
-          field:{}, joues:{}, assauts:[], enCours:false, phase:'roster', etape:0,
+          field:{}, joues:{}, assauts:[], enCours:false, ligue:null, phase:'roster', etape:0,
           debut:new Date().toISOString()};
 }
 function sauver(){ try{ localStorage.setItem(CLE, JSON.stringify(S)); }catch(e){} }
 function charger(){ try{ return JSON.parse(localStorage.getItem(CLE)); }catch(e){ return null; } }
 const nom = id => (S.roster.find(p=>p.id===id)||{}).nom || '?';
 const $ = s => document.querySelector(s);
+const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+
+// Python fournit la forme de chacun ; la console applique les règles à l'effectif du soir.
+function forme(id){
+  if(!S.ligue) return null;
+  const n = norm(nom(id));
+  return (S.ligue.membres||[]).find(m=>norm(m.nom)===n) || null;
+}
+function classePresents(){
+  // les classés d'abord, par taux de victoire ; les autres ensuite, du plus
+  // connu au moins connu (venir souvent vaut mieux qu'un ordre alphabétique)
+  return S.presents.slice().sort((a,b)=>{
+    const fa=forme(a), fb=forme(b);
+    const ra=(fa&&fa.ratio!=null)?fa.ratio:-1, rb=(fb&&fb.ratio!=null)?fb.ratio:-1;
+    if(ra!==rb) return rb-ra;
+    return ((fb&&fb.seances)||0)-((fa&&fa.seances)||0) || nom(a).localeCompare(nom(b));
+  });
+}
+function vivierSuggere(){
+  const pris=[...S.cap, ...S.protege.filter(Boolean)];
+  return classePresents().filter(id=>!pris.includes(id)).slice(0,8);
+}
+function capsSuggeres(){
+  // Jamais quelqu'un qui découvre le club ce soir : il ne connaît ni les gens
+  // ni les armes, et l'asymétrie d'information déciderait l'enchère.
+  const eligibles = S.presents.filter(id=>{ const f=forme(id); return f && f.seances>0; });
+  return eligibles.sort((a,b)=>{
+    const fa=forme(a), fb=forme(b);
+    return ((fa.cap)||0)-((fb.cap)||0)              // pas capitainé depuis le plus longtemps
+        || (fb.seances||0)-(fa.seances||0)          // à égalité, le plus assidu
+        || nom(a).localeCompare(nom(b));
+  }).slice(0,2);
+}
+// Les quartiles s'appliquent à l'intérieur du vivier : les 8 vendus sont déjà
+// les mieux classés, les tarifer sur le classement global les collerait tous en haut.
+function planchers(){
+  const out={};
+  if(!S.ligue){ S.vivier.forEach(id=>out[id]=5); return out; }
+  const fen=S.ligue.fenetre||3;
+  const dans=classePresents().filter(id=>S.vivier.includes(id));
+  const classes=dans.filter(id=>{const f=forme(id); return f && f.ratio!=null && f.seances>=fen;});
+  if(classes.length < MIN_CLASSES){ dans.forEach(id=>out[id]=PLANCHER_NEUF); return out; }
+  classes.forEach((i,k)=>{
+    const q=(k+1)/classes.length;
+    out[i]=(GRILLE.find(g=>q<=g[0])||[0,5])[1];
+  });
+  dans.filter(id=>!(id in out)).forEach(id=>out[id]=PLANCHER_NEUF);
+  return out;
+}
+function plancher(id){ return planchers()[id] || 5; }
+function pct(id){ const f=forme(id); return (f&&f.ratio!=null)?Math.round(f.ratio*100)+'%':'—'; }
 
 /* ------------------------------------------------ rendu général */
 function rendre(){
@@ -191,7 +246,7 @@ function rendre(){
     $('#num').textContent = S.presents.length || '—';
     $('#sous').textContent = S.phase==='roster' ? 'roster' : 'présents';
   }
-  ({roster:vRoster, presents:vPresents, constitution:vConstitution,
+  ({roster:vRoster, ligue:vLigue, presents:vPresents, constitution:vConstitution,
     combat:vCombat, bilan:vBilan})[S.phase]();
 }
 function vue(html, actions){
@@ -235,12 +290,37 @@ function vRoster(){
   vue(`<h2>Le roster du club</h2>
     <p class="hint">Un nom par ligne. Tu ne fais ça qu'une fois : il est conservé d'une séance à l'autre.</p>
     <textarea id="ta" placeholder="Kevin Durand&#10;Bruno Petit&#10;Marie Lambert">${S.roster.map(p=>p.nom).join('\n')}</textarea>`,
-    [{t:'Enregistrer le roster', cls:'go', f:()=>{
+    [{t:'Ligue', s:S.ligue?('màj '+S.ligue.genere):'aucune donnée', cls:'ghost sec',
+      f:()=>{S.phase='ligue';rendre();}},
+     {t:'Enregistrer le roster', cls:'go', f:()=>{
       const l = $('#ta').value.split('\n').map(s=>s.trim()).filter(Boolean);
       S.roster = l.map((n,i)=>({id:i+1, nom:n}));
       if(!S.roster.length) return;
       S.phase='presents'; rendre();
     }}]);
+}
+
+/* ------------------------------------------------ 1 bis. ligue */
+function vLigue(){
+  const n = S.ligue ? (S.ligue.membres||[]).length : 0;
+  vue(`<h2>Historique de la ligue</h2>
+    <p class="hint">Colle ici la sortie de <code>python -m viking.ligue</code>.
+    Elle sert à proposer les capitaines, le vivier et les planchers d'enchère.
+    ${n?`Actuellement : ${n} membres, généré le ${S.ligue.genere}.`
+       :`Aucune donnée pour l'instant — normal avant la 3<sup>e</sup> séance,
+         tout le monde ouvrira à 5.`}</p>
+    <textarea id="lig" placeholder='{"v":1,"genere":"…","membres":[…]}'></textarea>`,
+    [{t:'Retour', cls:'ghost sec', f:()=>{S.phase='roster';rendre();}},
+     {t:'Effacer', cls:'ghost sec', f:()=>{S.ligue=null;S.phase='roster';rendre();}},
+     {t:'Charger', cls:'go', f:()=>{
+       const t = $('#lig').value.trim();
+       if(!t) return;
+       try{
+         const d = JSON.parse(t);
+         if(!d.membres || !Array.isArray(d.membres)) throw 0;
+         S.ligue = d; S.phase='roster'; rendre();
+       }catch(e){ alert("Ce texte n'est pas un historique valide."); }
+     }}]);
 }
 
 /* ------------------------------------------------ 2. présents */
@@ -276,10 +356,16 @@ function vConstitution(){
 
   /* --- capitaines --- */
   if(S.etape===0){
+    const sugg = S.ligue ? capsSuggeres() : [];
     vue(strip+`<h2>Les deux capitaines</h2>
-      <p class="hint">Rotation : ceux qui n'ont pas capitainé depuis le plus longtemps. Choisis-en deux.</p>
-      ${jetons(pres, p=>({cls:S.cap.includes(p.id)?'on':''}))}`,
-      [retour,{t:'Suite', cls:'go', off:S.cap.length!==2, f:()=>{S.etape=1;rendre();}}]);
+      <p class="hint">Rotation : ceux qui n'ont pas capitainé depuis le plus longtemps.
+      ${sugg.length?`Proposés : <b>${sugg.map(nom).join('</b> et <b>')}</b>.`:'Choisis-en deux.'}</p>
+      ${jetons(pres, p=>({cls:S.cap.includes(p.id)?'on':'', 
+        sub: sugg.includes(p.id)&&!S.cap.includes(p.id) ? 'proposé' : ''}))}`,
+      [retour,
+       sugg.length&&!S.cap.length ? {t:'Prendre', s:'les proposés', cls:'ghost sec',
+         f:()=>{S.cap=[...sugg];rendre();}} : null,
+       {t:'Suite', cls:'go', off:S.cap.length!==2, f:()=>{S.etape=1;rendre();}}]);
     return surJeton(id=>{
       const i=S.cap.indexOf(id);
       if(i>=0) S.cap.splice(i,1); else if(S.cap.length<2) S.cap.push(id);
@@ -320,11 +406,17 @@ function vConstitution(){
   if(S.etape===2){
     const pris = [...S.cap, ...S.protege.filter(Boolean)];
     const dispo = pres.filter(p=>!pris.includes(p.id));
+    const sugg = S.ligue ? vivierSuggere() : [];
     vue(strip+`<h2>Le vivier · ${S.vivier.length}/8</h2>
-      <p class="hint">Les agents libres, les seuls mis aux enchères. Volontaires la première fois ;
-      ensuite les mieux classés.</p>
-      ${jetons(dispo, p=>({cls:S.vivier.includes(p.id)?'on':''}))}`,
-      [retour,{t:'Tirer au sort', s:`${dispo.length-S.vivier.length} restants`, cls:'go',
+      <p class="hint">Les agents libres, les seuls mis aux enchères.
+      ${S.ligue?'Les mieux classés sont proposés.':'Volontaires la première fois.'}</p>
+      ${jetons(dispo, p=>({cls:S.vivier.includes(p.id)?'on':'',
+        sub: S.ligue ? (S.vivier.includes(p.id)?pct(p.id)
+                        : (sugg.includes(p.id)?'proposé · '+pct(p.id):pct(p.id))) : ''}))}`,
+      [retour,
+       sugg.length ? {t:'Prendre', s:'les 8 proposés', cls:'ghost sec',
+         f:()=>{S.vivier=[...sugg];rendre();}} : null,
+       {t:'Tirer au sort', s:`${dispo.length-S.vivier.length} restants`, cls:'go',
         off:!S.vivier.length, f:()=>{tirage(); S.etape=3; rendre();}}]);
     return surJeton(id=>{
       const i=S.vivier.indexOf(id);
@@ -355,13 +447,15 @@ function vConstitution(){
   if(S.etape===4){
     vue(strip+`<h2>L'enchère</h2>
       <p class="hint">Nominer, c'est miser : ouverture au plancher, incrément 5, 10 secondes sans
-      relance et c'est adjugé. Budget ${S.budget} pièces chacun.</p>
+      relance et c'est adjugé. Budget ${S.budget} pièces chacun.
+      ${S.ligue?'':'<br>Pas d\'historique chargé : tout le monde ouvre à 5.'}</p>
       <table><tr><th>Équipe</th><th class="n">Dépensé</th><th class="n">Reste</th><th class="n">Lots</th></tr>
       ${['A','B'].map(e=>`<tr><td style="color:var(--${e==='A'?'a':'b'});font-weight:700">${nom(S.cap[e==='A'?0:1])}</td>
         <td class="n">${dep(e)}</td><td class="n">${S.budget-dep(e)}</td>
         <td class="n">${S.vivier.filter(i=>S.eq[i]===e).length}/4</td></tr>`).join('')}</table>
       <h3 style="margin:16px 0 6px">À vendre · ${reste.length}</h3>
-      ${reste.length ? jetons(S.roster.filter(p=>reste.includes(p.id)), ()=>({}))
+      ${reste.length ? jetons(S.roster.filter(p=>reste.includes(p.id)),
+                        p=>({sub:'ouverture '+plancher(p.id)+(S.ligue?' · '+pct(p.id):'')}))
                      : '<p class="hint">Tout est vendu.</p>'}
       <h3 style="margin:16px 0 6px">Adjugés</h3>
       ${jetons(S.roster.filter(p=>S.vivier.includes(p.id)&&S.eq[p.id]), p=>({
@@ -391,8 +485,8 @@ function cycleLoadout(id){
 
 /* ------------------------------------------------ pavé numérique */
 let paveCb=null;
-function pave(titre, cb){
-  paveCb=cb; let v='';
+function pave(titre, cb, depart){
+  paveCb=cb; let v = depart ? String(depart) : '';
   const maj = ()=> $('#paveVal').textContent = (v||'0')+' pièces';
   $('#paveRapide').innerHTML = [5,10,15,20,25,30,40,50,60,80].map(n=>`<button data-v="${n}">${n}</button>`).join('');
   $('#paveNum').innerHTML = [1,2,3,4,5,6,7,8,9,'C',0,'OK'].map(n=>
@@ -415,7 +509,7 @@ function acheter(id){
     const choix = document.createElement('div');
     S._achat={id, prix:prixPaye};
     vueAchat();
-  });
+  }, plancher(id));
 }
 function vueAchat(){
   const {id,prix} = S._achat;
