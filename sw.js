@@ -1,6 +1,6 @@
 /* Met la console en cache au premier chargement : ensuite elle s'ouvre
    intégralement hors ligne, y compris depuis l'icône de l'écran d'accueil. */
-const CACHE = 'mag-v6';
+const CACHE = 'mag-v7';
 const FICHIERS = ['./', './index.html'];
 
 self.addEventListener('install', e => {

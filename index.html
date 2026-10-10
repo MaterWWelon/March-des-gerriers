@@ -85,7 +85,7 @@ h2{margin:0 0 4px;font-size:19px;font-weight:700}
 
 /* ---------- barre d'action ---------- */
 #act{
-  flex:0 0 auto;display:flex;gap:7px;padding:9px 10px;max-width:100%;
+  flex:0 0 auto;display:flex;flex-direction:column;gap:7px;padding:9px 10px;max-width:100%;
   padding-left:calc(10px + env(safe-area-inset-left,0px));
   padding-right:calc(10px + env(safe-area-inset-right,0px));
   padding-bottom:calc(9px + env(safe-area-inset-bottom,0px));
@@ -98,7 +98,9 @@ h2{margin:0 0 4px;font-size:19px;font-weight:700}
   text-align:center;line-height:1.15;padding:6px 8px;overflow:hidden
 }
 .btn>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.btn.mini{flex:0 0 54px;font-size:21px}
+.rang{display:flex;gap:7px;max-width:100%}
+.rang.sec .btn{min-height:46px;font-size:15px}
+.rang.sec .btn small{font-size:11px}
 .btn.ghost{background:#fff;color:var(--ink);border:2px solid var(--line)}
 .btn.va{background:var(--a)} .btn.vb{background:var(--b)}
 .btn.go{background:var(--go)}
@@ -194,15 +196,26 @@ function rendre(){
 }
 function vue(html, actions){
   $('#vue').innerHTML = html;
-  $('#act').innerHTML = '';
-  (actions||[]).forEach(a=>{
-    if(!a) return;
-    const b=document.createElement('button');
-    b.className='btn '+(a.cls||'');
-    b.innerHTML = `<span>${a.t}</span>` + (a.s?`<small>${a.s}</small>`:'');
-    if(a.off) b.disabled=true; else b.onclick=a.f;
-    $('#act').appendChild(b);
-  });
+  const act = $('#act');
+  act.innerHTML = '';
+  const liste = (actions||[]).filter(Boolean);
+  // Les actions marquées 'sec' vont sur une rangée haute, en petit.
+  // Les principales restent en bas, en grand, sous le pouce.
+  const rangee = (arr, cls)=>{
+    if(!arr.length) return;
+    const d = document.createElement('div');
+    d.className = 'rang ' + cls;
+    arr.forEach(a=>{
+      const b = document.createElement('button');
+      b.className = 'btn ' + (a.cls||'');
+      b.innerHTML = `<span>${a.t}</span>` + (a.s?`<small>${a.s}</small>`:'');
+      if(a.off) b.disabled = true; else b.onclick = a.f;
+      d.appendChild(b);
+    });
+    act.appendChild(d);
+  };
+  rangee(liste.filter(a=>(a.cls||'').includes('sec')), 'sec');
+  rangee(liste.filter(a=>!(a.cls||'').includes('sec')), 'pri');
   $('#vue').scrollTop = 0;
 }
 function jetons(liste, opts){
@@ -238,7 +251,7 @@ function vPresents(){
     <p class="hint">${n} présents${n>=12?` · terrain ${t}v${t} · équipes de ${Math.floor(n/2)}`:' · il en faut 12 minimum'}</p>
     ${jetons(S.roster, p=>({cls: S.presents.includes(p.id)?'on':''}))}`,
     [{t:'Roster', cls:'ghost', f:()=>{S.phase='roster';rendre();}},
-     {t:'Constituer les équipes', cls:'go', off:n<12, f:()=>{
+     {t:'Constituer', s:'les équipes', cls:'go', off:n<12, f:()=>{
        S.terrain=t; S.phase='constitution'; S.etape=0; rendre();}}]);
   surJeton(id=>{
     const i=S.presents.indexOf(id);
@@ -252,7 +265,7 @@ const ETAPES = ['Capitaines','Protégés','Vivier','Tirage','Enchère'];
 function vConstitution(){
   const pres = S.roster.filter(p=>S.presents.includes(p.id));
   const strip = `<div class="pas">${ETAPES.map((_,i)=>`<i class="${i<=S.etape?'fait':''}"></i>`).join('')}</div>`;
-  const retour = {t:'Retour', cls:'ghost', f:()=>{
+  const retour = {t:'Retour', cls:'ghost sec', f:()=>{
     // Revenir en arrière annule l'étape qu'on quitte, sinon les choix s'accumulent.
     if(S.etape===4){ S.vivier.forEach(id=>{ delete S.eq[id]; delete S.prix[id]; delete S.role[id]; }); S.etape=3; }
     else if(S.etape===3){ S.eq={}; S.role={}; S.etape=2; }
@@ -407,9 +420,9 @@ function acheter(id){
 function vueAchat(){
   const {id,prix} = S._achat;
   vue(`<h2>${nom(id)} · ${prix} pièces</h2><p class="hint">Qui l'emporte ?</p>`,
-    [{t:nom(S.cap[0]), cls:'va', f:()=>adjuger('A')},
-     {t:nom(S.cap[1]), cls:'vb', f:()=>adjuger('B')},
-     {t:'Annuler', cls:'ghost', f:()=>{delete S._achat;rendre();}}]);
+    [{t:nom(S.cap[0]).split(' ')[0], cls:'va', f:()=>adjuger('A')},
+     {t:nom(S.cap[1]).split(' ')[0], cls:'vb', f:()=>adjuger('B')},
+     {t:'Annuler', cls:'ghost sec', f:()=>{delete S._achat;rendre();}}]);
 }
 function adjuger(e){
   const {id,prix}=S._achat;
@@ -452,9 +465,9 @@ function vCombat(){
       <p class="hint">Cible ${S.terrain} par camp, mais tu peux en mettre plus ou moins —
       les nombres inégaux sont permis. Trié par assauts joués, liseré orange : pas encore combattu.
       ${a&&b&&a!==b?`<br><b>${a} contre ${b}</b>`:''}</p>${bancs}`,
-      [S.assauts.length ? null : {t:'Retour', cls:'ghost',
+      [S.assauts.length ? null : {t:'Retour', cls:'ghost sec',
          f:()=>{S.field={};S.phase='constitution';S.etape=4;rendre();}},
-       {t:'Compléter', s:'les moins joués', cls:'ghost', f:completer},
+       {t:'Compléter', s:'les moins joués', cls:'ghost sec', f:completer},
        {t:'Lancer', s:'l\'assaut', cls:'go', off:!prets(),
          f:()=>{S.enCours=true;S.surv=[];rendre();}}]);
     return surJeton(id=>{
@@ -468,9 +481,9 @@ function vCombat(){
   vue(`<div id="terrain">${html}</div>
     <p class="hint">Tape ceux qui sont encore debout, puis le vainqueur.
     ${S.surv.length} survivant${S.surv.length>1?'s':''}.</p>`,
-    [{t:'↩', cls:'ghost mini', f:()=>{S.enCours=false;S.surv=[];rendre();}},
+    [{t:'Corriger', s:'la compo', cls:'ghost sec', f:()=>{S.enCours=false;S.surv=[];rendre();}},
+     {t:'Match nul', cls:'ghost sec', f:()=>valider('nul')},
      {t:court(0), s:'vainqueur', cls:'va', f:()=>valider('A')},
-     {t:'Nul', cls:'ghost mini', f:()=>valider('nul')},
      {t:court(1), s:'vainqueur', cls:'vb', f:()=>valider('B')}]);
   surJeton(id=>{
     const i=S.surv.indexOf(id);
@@ -531,7 +544,7 @@ function vBilan(){
     ${lignes.map(l=>`<tr><td style="color:var(--${l.e==='A'?'a':'b'})">${l.nom}</td>
       <td class="n">${l.a}</td><td class="n">${l.v}</td><td class="n">${l.s}</td>
       <td class="n">${l.p||'—'}</td></tr>`).join('')}</table>`,
-    [{t:'Reprendre', cls:'ghost', f:()=>{S.phase='combat';rendre();}},
+    [{t:'Reprendre', cls:'ghost sec', f:()=>{S.phase='combat';rendre();}},
      {t:'Exporter', s:'fichier .json', cls:'go', f:exporter},
      {t:'Copier', cls:'ghost', f:copier}]);
 }
