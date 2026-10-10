@@ -156,7 +156,7 @@ function neuf(){
   return {roster:[], presents:[], terrain:6, budget:140,
           eq:{}, role:{}, prix:{}, load:{},
           cap:[], protege:[], vivier:[],
-          field:{}, joues:{}, assauts:[], phase:'roster', etape:0,
+          field:{}, joues:{}, assauts:[], enCours:false, phase:'roster', etape:0,
           debut:new Date().toISOString()};
 }
 function sauver(){ try{ localStorage.setItem(CLE, JSON.stringify(S)); }catch(e){} }
@@ -303,8 +303,8 @@ function vConstitution(){
       <p class="hint">Les agents libres, les seuls mis aux enchères. Volontaires la première fois ;
       ensuite les mieux classés.</p>
       ${jetons(dispo, p=>({cls:S.vivier.includes(p.id)?'on':''}))}`,
-      [retour,{t:'Tirer au sort le reste', cls:'go', off:!S.vivier.length,
-        f:()=>{tirage(); S.etape=3; rendre();}}]);
+      [retour,{t:'Tirer au sort', s:`${dispo.length-S.vivier.length} restants`, cls:'go',
+        off:!S.vivier.length, f:()=>{tirage(); S.etape=3; rendre();}}]);
     return surJeton(id=>{
       const i=S.vivier.indexOf(id);
       if(i>=0) S.vivier.splice(i,1); else if(S.vivier.length<8) S.vivier.push(id);
@@ -322,7 +322,8 @@ function vConstitution(){
         ${jetons(S.roster.filter(p=>S.eq[p.id]===e), p=>({
           cls:e.toLowerCase(), sub:S.role[p.id]+(S.load[p.id]?' · '+LOADOUTS[S.load[p.id]]:'')
         }))}`).join('')}`,
-      [{t:'Retirer', cls:'ghost', f:()=>{tirage();rendre();}},
+      [retour,
+       {t:'Retirer', cls:'ghost', f:()=>{tirage();rendre();}},
        {t:'Enchère', cls:'go', f:()=>{S.etape=4;rendre();}}]);
     return surJeton(id=> cycleLoadout(id));
   }
@@ -390,6 +391,7 @@ function ferme(){ $('#pave').classList.remove('open'); }
 
 function acheter(id){
   pave(nom(id), prixPaye=>{
+    const choix = document.createElement('div');
     S._achat={id, prix:prixPaye};
     vueAchat();
   });
@@ -411,14 +413,15 @@ function adjuger(e){
 function camp(e){ return S.presents.filter(id=>S.eq[id]===e); }
 function surTerrain(e){ return Object.keys(S.field).filter(id=>S.field[id]===e).map(Number); }
 function banc(e){ return camp(e).filter(id=>!(id in S.field)); }
-function plein(){ return surTerrain('A').length>=S.terrain && surTerrain('B').length>=S.terrain; }
+function plein(){ return ['A','B'].every(e=> surTerrain(e).length>=S.terrain || !banc(e).length); }
+function prets(){ return surTerrain('A').length>0 && surTerrain('B').length>0; }
 
 function vCombat(){
   const html = ['A','B'].map(e=>{
     const sur = surTerrain(e);
     const manque = S.terrain - sur.length;
     return `<div class="camp ${e.toLowerCase()}">
-      <h3>${nom(S.cap[e==='A'?0:1])} · ${sur.length}/${S.terrain}</h3>
+      <h3>${nom(S.cap[e==='A'?0:1])} · ${sur.length}${sur.length===S.terrain?'':' / '+S.terrain}</h3>
       ${sur.length ? jetons(sur.map(id=>({id,nom:nom(id)})), p=>({
           cls:(S.surv||[]).includes(p.id)?'vivant':'mort',
           sub:S.load[p.id]?LOADOUTS[S.load[p.id]]:''}))
@@ -427,7 +430,7 @@ function vCombat(){
     </div>`;
   }).join('');
 
-  if(!plein()){
+  if(!S.enCours){
     const bancs = ['A','B'].map(e=>{
       const b = banc(e).sort((x,y)=>(S.joues[x]||0)-(S.joues[y]||0) || nom(x).localeCompare(nom(y)));
       if(!b.length) return '';
@@ -436,13 +439,18 @@ function vCombat(){
           cls:(S.joues[p.id]||0)===0?'neuf':'',
           sub:(S.joues[p.id]||0)+' assauts'}))}`;
     }).join('');
+    const a = surTerrain('A').length, b = surTerrain('B').length;
     vue(`<div id="terrain">${html}</div>
-      <p class="hint">Trié par assauts joués. Le liseré orange : pas encore combattu.</p>${bancs}`,
-      [{t:'Compléter', s:'les moins joués', cls:'go', f:completer}]);
+      <p class="hint">Cible ${S.terrain} par camp, mais tu peux en mettre plus ou moins —
+      les nombres inégaux sont permis. Trié par assauts joués, liseré orange : pas encore combattu.
+      ${a&&b&&a!==b?`<br><b>${a} contre ${b}</b>`:''}</p>${bancs}`,
+      [S.assauts.length ? null : {t:'Retour', cls:'ghost',
+         f:()=>{S.field={};S.phase='constitution';S.etape=4;rendre();}},
+       {t:'Compléter', s:'les moins joués', cls:'ghost', f:completer},
+       {t:'Lancer', s:'l\'assaut', cls:'go', off:!prets(),
+         f:()=>{S.enCours=true;S.surv=[];rendre();}}]);
     return surJeton(id=>{
-      const e = S.eq[id];
-      if(id in S.field){ delete S.field[id]; }
-      else if(surTerrain(e).length < S.terrain){ S.field[id]=e; }
+      if(id in S.field){ delete S.field[id]; } else { S.field[id]=S.eq[id]; }
       rendre();
     });
   }
@@ -451,7 +459,8 @@ function vCombat(){
   vue(`<div id="terrain">${html}</div>
     <p class="hint">Tape ceux qui sont encore debout, puis le vainqueur.
     ${S.surv.length} survivant${S.surv.length>1?'s':''}.</p>`,
-    [{t:nom(S.cap[0]), s:'vainqueur', cls:'va', f:()=>valider('A')},
+    [{t:'↩', s:'compo', cls:'ghost', f:()=>{S.enCours=false;S.surv=[];rendre();}},
+     {t:nom(S.cap[0]), s:'vainqueur', cls:'va', f:()=>valider('A')},
      {t:'Nul', cls:'ghost', f:()=>valider('nul')},
      {t:nom(S.cap[1]), s:'vainqueur', cls:'vb', f:()=>valider('B')}]);
   surJeton(id=>{
@@ -464,7 +473,8 @@ function vCombat(){
 function completer(){
   ['A','B'].forEach(e=>{
     const b = banc(e).sort((x,y)=>(S.joues[x]||0)-(S.joues[y]||0) || nom(x).localeCompare(nom(y)));
-    b.slice(0, S.terrain-surTerrain(e).length).forEach(id=> S.field[id]=e);
+    const manque = S.terrain - surTerrain(e).length;
+    if(manque > 0) b.slice(0, manque).forEach(id=> S.field[id]=e);
   });
   rendre();
 }
@@ -477,6 +487,7 @@ function valider(v){
   S.field = {};
   (S.surv||[]).forEach(id=> S.field[id]=compo[id]);
   S.surv = [];
+  S.enCours = false;
   rendre();
 }
 
@@ -486,7 +497,7 @@ $('#undo').onclick = ()=>{
   if(!a) return;
   Object.keys(a.compo).forEach(id=> S.joues[id]=Math.max(0,(S.joues[id]||1)-1));
   const av = S.assauts[S.assauts.length-1];
-  S.field = {}; S.surv = [];
+  S.field = {}; S.surv = []; S.enCours = false;
   if(av) av.surv.forEach(id=> S.field[id]=av.compo[id]);
   rendre();
 };
@@ -525,6 +536,8 @@ function paquet(){
 async function exporter(){
   const nomF = 'seance-'+new Date().toISOString().slice(0,10)+'.json';
   const txt = paquet();
+  // iOS : la feuille de partage (AirDrop, Mail, Fichiers) marche même en mode
+  // plein écran, contrairement au téléchargement classique.
   try{
     const f = new File([txt], nomF, {type:'application/json'});
     if(navigator.canShare && navigator.canShare({files:[f]})){
@@ -548,6 +561,8 @@ async function copier(){
   }
 }
 
+/* ------------------------------------------------ accès bilan depuis le combat */
+document.addEventListener('keydown', e=>{ if(e.key==='b' && S.phase==='combat'){ S.phase='bilan'; rendre(); }});
 $('#tour').onclick = ()=>{
   if(S.phase==='combat'){ S.phase='bilan'; rendre(); }
   else if(S.phase==='bilan'){ S.phase='combat'; rendre(); }
@@ -561,4 +576,3 @@ if('serviceWorker' in navigator){
 </script>
 </body>
 </html>
-
